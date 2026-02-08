@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Favicon Supercookie - Probe Page</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #0f0;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        h1 { color: #0f0; margin-bottom: 5px; font-size: 1.4em; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 0.85em; }
+        .probe-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 4px;
+            max-width: 500px;
+            margin: 20px 0;
+        }
+        .probe-cell {
+            aspect-ratio: 1;
+            border: 1px solid #222;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            transition: all 0.3s;
+        }
+        .probe-cell.hit {
+            background: #0f0;
+            color: #000;
+            border-color: #0f0;
+        }
+        .probe-cell.miss {
+            background: #1a0000;
+            color: #600;
+            border-color: #300;
+        }
+        .probe-cell.pending {
+            background: #111;
+            color: #333;
+            border-color: #222;
+        }
+        #log {
+            margin-top: 20px;
+            padding: 15px;
+            background: #111;
+            border: 1px solid #222;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .log-hit { color: #0f0; }
+        .log-miss { color: #f00; }
+        .log-info { color: #888; }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 2px solid #0f0;
+            font-size: 1.1em;
+            display: none;
+        }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 24px;
+            font-family: monospace;
+            font-size: 14px;
+            cursor: pointer;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover { background: #0c0; }
+        .explanation {
+            color: #888;
+            font-size: 0.8em;
+            line-height: 1.5;
+            margin: 15px 0;
+            max-width: 600px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🔍 Favicon Supercookie Probe</h1>
+    <div class="subtitle">Detecting cached tracking favicons without cookies or JavaScript storage</div>
+
+    <div class="explanation">
+        This page attempts to read back a tracking ID that was set via the favicon cache.
+        Each cell represents one probe - a unique favicon URL. If the browser has it cached
+        (from a previous visit to the tracker page), the request returns instantly (cache hit = green).
+        If not cached, it's a miss (red). The pattern of hits/misses reconstructs the tracking ID.
+    </div>
+
+    <button onclick="runProbes()">▶ Run Probe Scan</button>
+    <button onclick="clearAndProbe()">🧹 Clear Cookies + Re-probe</button>
+
+    <div class="probe-grid" id="grid"></div>
+    <div id="result"></div>
+    <div id="log"></div>
+
+    <script>
+        const PROBE_COUNT = 32; // 32 probes = 32 bits of tracking ID
+        const grid = document.getElementById('grid');
+        const log = document.getElementById('log');
+        const result = document.getElementById('result');
+
+        // Initialize grid
+        for (let i = 0; i < PROBE_COUNT; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'probe-cell pending';
+            cell.id = `cell-${i}`;
+            cell.textContent = i;
+            grid.appendChild(cell);
+        }
+
+        function addLog(msg, className = 'log-info') {
+            const line = document.createElement('div');
+            line.className = className;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            log.prepend(line);
+        }
+
+        async function probeOne(index) {
+            const cell = document.getElementById(`cell-${index}`);
+            const url = `/probe/${index}/favicon.bmp?t=${Date.now()}`;
+
+            const start = performance.now();
+
+            return new Promise((resolve) => {
+                // Use an Image object to load the favicon probe
+                // Cache hits resolve much faster than cache misses
+                const img = new Image();
+
+                img.onload = () => {
+                    const elapsed = performance.now() - start;
+                    // Heuristic: cache hits typically < 5ms, misses > 20ms
+                    // This threshold varies by browser/network
+                    const cached = elapsed < 10;
+
+                    cell.className = `probe-cell ${cached ? 'hit' : 'miss'}`;
+                    cell.textContent = cached ? '1' : '0';
+                    addLog(
+                        `Probe ${index}: ${cached ? 'HIT' : 'MISS'} (${elapsed.toFixed(1)}ms)`,
+                        cached ? 'log-hit' : 'log-miss'
+                    );
+                    resolve({ index, cached, elapsed });
+                };
+
+                img.onerror = () => {
+                    const elapsed = performance.now() - start;
+                    cell.className = 'probe-cell miss';
+                    cell.textContent = '0';
+                    addLog(`Probe ${index}: ERROR (${elapsed.toFixed(1)}ms)`, 'log-miss');
+                    resolve({ index, cached: false, elapsed });
+                };
+
+                img.src = url;
+            });
+        }
+
+        async function runProbes() {
+            addLog('Starting favicon cache probe scan...', 'log-info');
+            addLog(`Probing ${PROBE_COUNT} cached favicon URLs...`, 'log-info');
+
+            // Reset grid
+            for (let i = 0; i < PROBE_COUNT; i++) {
+                const cell = document.getElementById(`cell-${i}`);
+                cell.className = 'probe-cell pending';
+                cell.textContent = i;
+            }
+
+            // Run probes sequentially to get accurate timing
+            const results = [];
+            for (let i = 0; i < PROBE_COUNT; i++) {
+                const r = await probeOne(i);
+                results.push(r);
+                // Small delay between probes to avoid timing interference
+                await new Promise(r => setTimeout(r, 50));
+            }
+
+            // Reconstruct tracking ID from cache hit pattern
+            const bits = results.map(r => r.cached ? '1' : '0').join('');
+            const hitCount = results.filter(r => r.cached).length;
+            const avgHitTime = results.filter(r => r.cached).reduce((s, r) => s + r.elapsed, 0) / (hitCount || 1);
+            const avgMissTime = results.filter(r => !r.cached).reduce((s, r) => s + r.elapsed, 0) / ((PROBE_COUNT - hitCount) || 1);
+
+            result.style.display = 'block';
+            result.innerHTML = `
+                <strong>Scan Complete</strong><br><br>
+                Bit pattern: ${bits}<br>
+                Cache hits: ${hitCount}/${PROBE_COUNT}<br>
+                Avg hit time: ${avgHitTime.toFixed(1)}ms<br>
+                Avg miss time: ${avgMissTime.toFixed(1)}ms<br><br>
+                ${hitCount > 0
+                    ? `⚠️ <strong>SUPERCOOKIE DETECTED</strong> - This browser has cached tracking favicons from a previous visit. No cookies or JS storage were used.`
+                    : `✅ No cached tracking favicons detected.`
+                }
+            `;
+
+            addLog(`Scan complete: ${hitCount}/${PROBE_COUNT} cache hits`, hitCount > 0 ? 'log-hit' : 'log-info');
+        }
+
+        function clearAndProbe() {
+            addLog('Clearing all cookies and localStorage...', 'log-info');
+
+            // Clear everything we can
+            document.cookie.split(";").forEach(c => {
+                document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+            });
+            try { localStorage.clear(); } catch(e) {}
+            try { sessionStorage.clear(); } catch(e) {}
+
+            addLog('✓ Cookies cleared', 'log-info');
+            addLog('✓ localStorage cleared', 'log-info');
+            addLog('✓ sessionStorage cleared', 'log-info');
+            addLog('Note: Favicon cache is NOT affected by these operations', 'log-hit');
+            addLog('Re-running probe scan...', 'log-info');
+
+            setTimeout(runProbes, 500);
+        }
+    </script>
+
+</body>
+</html>

